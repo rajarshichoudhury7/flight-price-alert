@@ -46,7 +46,8 @@ def search_flights(departure_date: str) -> list[dict]:
     # Print top-level keys to help debug response structure
     print(f"Response keys: {list(data.keys())}")
 
-    flights = data.get("best_flights", []) + data.get("other_flights", [])
+    # other_flights don't include a price field, so only use best_flights
+    flights = data.get("best_flights", [])
 
     # Print first flight object so we can see the exact structure
     if flights:
