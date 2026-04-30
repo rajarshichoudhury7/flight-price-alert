@@ -11,7 +11,6 @@ ORIGIN = "SYD"
 DESTINATION = "MAA"
 SERPAPI_URL = "https://serpapi.com/search"
 
-# All candidate departure dates — one is selected per run via rotation
 DATES = [
     "2026-06-27", "2026-06-28", "2026-06-29", "2026-06-30",
     "2026-07-01", "2026-07-02", "2026-07-03", "2026-07-04",
@@ -19,9 +18,6 @@ DATES = [
 
 
 def pick_date() -> str:
-    """Rotate through DATES so each run checks a different date.
-    With 3 runs/day (every 8 h) this cycles each date roughly every 2-3 days,
-    keeping total API usage at ~90 calls/month within the SerpAPI free tier."""
     now = datetime.now(UTC)
     run_slot = now.timetuple().tm_yday * 3 + now.hour // 8
     return DATES[run_slot % len(DATES)]
@@ -35,32 +31,19 @@ def search_flights(departure_date: str) -> list[dict]:
         "outbound_date": departure_date,
         "currency": "INR",
         "hl": "en",
-        "type": "2",        # one-way
+        "type": "2",
         "adults": ADULTS,
         "api_key": SERPAPI_KEY,
     }
     response = requests.get(SERPAPI_URL, params=params, timeout=15)
     response.raise_for_status()
     data = response.json()
-
-    # Print top-level keys to help debug response structure
-    print(f"Response keys: {list(data.keys())}")
-
-    # other_flights don't include a price field, so only use best_flights
-    flights = data.get("best_flights", [])
-
-    # Print first flight object so we can see the exact structure
-    if flights:
-        print(f"Sample flight keys: {list(flights[0].keys())}")
-
-    return flights
+    return data.get("best_flights", [])
 
 
 def extract_price(flight: dict) -> float:
-    # SerpAPI sometimes nests price differently — try known locations
     if "price" in flight:
         return float(flight["price"])
-    # Fallback: price inside a nested dict
     for key in ("fare", "total", "amount"):
         if key in flight:
             return float(flight[key])
@@ -71,25 +54,49 @@ def cheapest(flights: list[dict]) -> dict | None:
     return min(flights, key=extract_price) if flights else None
 
 
+def format_duration(minutes: int) -> str:
+    return f"{minutes // 60}h {minutes % 60}m"
+
+
 def format_flight(flight: dict) -> str:
     legs = flight.get("flights", [])
     if not legs:
         return ""
-    dep = legs[0]["departure_airport"]
-    arr = legs[-1]["arrival_airport"]
+
+    lines = []
+    total = format_duration(flight.get("total_duration", 0))
     stops = len(legs) - 1
     stop_label = "non-stop" if stops == 0 else f"{stops} stop(s)"
-    return (
-        f"{dep['id']} {dep['time']} → {arr['id']} {arr['time']} ({stop_label})"
-    )
+    lines.append(f"  {stop_label}, total {total}")
+
+    for i, leg in enumerate(legs, 1):
+        dep = leg["departure_airport"]
+        arr = leg["arrival_airport"]
+        airline = leg.get("airline", "")
+        flight_no = leg.get("flight_number", "")
+        duration = format_duration(leg.get("duration", 0))
+        lines.append(
+            f"  Leg {i}: {dep['id']} {dep['time']} -> {arr['id']} {arr['time']} "
+            f"({airline} {flight_no}, {duration})"
+        )
+
+        layovers = flight.get("layovers", [])
+        if i <= len(layovers):
+            lv = layovers[i - 1]
+            lines.append(
+                f"  Layover: {lv.get('name', lv.get('id', ''))} "
+                f"({format_duration(lv.get('duration', 0))})"
+            )
+
+    return "\n".join(lines)
 
 
 def send_alert(flight: dict, price: float, departure_date: str) -> None:
     itinerary = format_flight(flight)
     body = (
-        f"Price: ₹{price:,.0f}  (threshold ₹{PRICE_THRESHOLD_INR:,})\n"
+        f"Price: Rs{price:,.0f} (threshold Rs{PRICE_THRESHOLD_INR:,})\n"
         f"Date: {departure_date}\n"
-        f"Route: {itinerary}\n\n"
+        f"Flight details:\n{itinerary}\n\n"
         f"Book now before the price changes!"
     )
     requests.post(
@@ -102,13 +109,13 @@ def send_alert(flight: dict, price: float, departure_date: str) -> None:
         },
         timeout=10,
     )
-    print(f"Alert sent! ₹{price:,.0f} on {departure_date}")
+    print(f"Alert sent! Rs{price:,.0f} on {departure_date}")
 
 
 def main() -> None:
     departure_date = pick_date()
     print(
-        f"[{datetime.now(UTC).isoformat()}] Checking {ORIGIN}→{DESTINATION} "
+        f"[{datetime.now(UTC).isoformat()}] Checking {ORIGIN}->>{DESTINATION} "
         f"on {departure_date}"
     )
 
@@ -120,12 +127,12 @@ def main() -> None:
 
     best = cheapest(flights)
     price = extract_price(best)
-    print(f"Cheapest: ₹{price:,.0f}  (threshold: ₹{PRICE_THRESHOLD_INR:,})")
+    print(f"Cheapest: Rs{price:,.0f}  (threshold: Rs{PRICE_THRESHOLD_INR:,})")
 
     if price <= PRICE_THRESHOLD_INR:
         send_alert(best, price, departure_date)
     else:
-        print("Price above threshold — no alert sent.")
+        print("Price above threshold -- no alert sent.")
 
 
 if __name__ == "__main__":
