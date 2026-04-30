@@ -96,7 +96,7 @@ def send_alert(flight: dict, price: float, departure_date: str) -> None:
         f"https://ntfy.sh/{NTFY_TOPIC}",
         data=body,
         headers={
-            "Title": f"Flight Alert: SYD→MAA ₹{price:,.0f}",
+            "Title": f"Flight Alert: SYD->MAA Rs{price:,.0f}",
             "Priority": "high",
             "Tags": "airplane,money",
         },
