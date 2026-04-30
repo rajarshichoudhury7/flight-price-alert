@@ -25,5 +25,5 @@ jobs:
         env:
           SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
-          PRICE_THRESHOLD_INR: "60000"
+          PRICE_THRESHOLD_INR: "35000"
           ADULTS: "1"
