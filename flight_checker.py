@@ -1,6 +1,6 @@
 import os
 import requests
-from datetime import datetime
+from datetime import datetime, UTC
 
 SERPAPI_KEY = os.environ["SERPAPI_KEY"]
 NTFY_TOPIC = os.environ["NTFY_TOPIC"]
@@ -22,7 +22,7 @@ def pick_date() -> str:
     """Rotate through DATES so each run checks a different date.
     With 3 runs/day (every 8 h) this cycles each date roughly every 2-3 days,
     keeping total API usage at ~90 calls/month within the SerpAPI free tier."""
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     run_slot = now.timetuple().tm_yday * 3 + now.hour // 8
     return DATES[run_slot % len(DATES)]
 
@@ -42,11 +42,32 @@ def search_flights(departure_date: str) -> list[dict]:
     response = requests.get(SERPAPI_URL, params=params, timeout=15)
     response.raise_for_status()
     data = response.json()
-    return data.get("best_flights", []) + data.get("other_flights", [])
+
+    # Print top-level keys to help debug response structure
+    print(f"Response keys: {list(data.keys())}")
+
+    flights = data.get("best_flights", []) + data.get("other_flights", [])
+
+    # Print first flight object so we can see the exact structure
+    if flights:
+        print(f"Sample flight keys: {list(flights[0].keys())}")
+
+    return flights
+
+
+def extract_price(flight: dict) -> float:
+    # SerpAPI sometimes nests price differently — try known locations
+    if "price" in flight:
+        return float(flight["price"])
+    # Fallback: price inside a nested dict
+    for key in ("fare", "total", "amount"):
+        if key in flight:
+            return float(flight[key])
+    raise KeyError(f"Could not find price in flight object. Keys: {list(flight.keys())}")
 
 
 def cheapest(flights: list[dict]) -> dict | None:
-    return min(flights, key=lambda f: f["price"]) if flights else None
+    return min(flights, key=extract_price) if flights else None
 
 
 def format_flight(flight: dict) -> str:
@@ -86,7 +107,7 @@ def send_alert(flight: dict, price: float, departure_date: str) -> None:
 def main() -> None:
     departure_date = pick_date()
     print(
-        f"[{datetime.utcnow().isoformat()}] Checking {ORIGIN}→{DESTINATION} "
+        f"[{datetime.now(UTC).isoformat()}] Checking {ORIGIN}→{DESTINATION} "
         f"on {departure_date}"
     )
 
@@ -97,7 +118,7 @@ def main() -> None:
         return
 
     best = cheapest(flights)
-    price = float(best["price"])
+    price = extract_price(best)
     print(f"Cheapest: ₹{price:,.0f}  (threshold: ₹{PRICE_THRESHOLD_INR:,})")
 
     if price <= PRICE_THRESHOLD_INR:
