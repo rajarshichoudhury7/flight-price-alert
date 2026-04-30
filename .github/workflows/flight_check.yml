@@ -1,0 +1,29 @@
+name: Flight Price Alert – SYD → MAA
+
+on:
+  schedule:
+    - cron: "0 */8 * * *"    # Runs every 8 hours (00:00, 08:00, 16:00 UTC)
+  workflow_dispatch:          # Allows manual trigger from GitHub UI
+
+jobs:
+  check-prices:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Check flights (rotating date Jun 27 – Jul 4)
+        run: python flight_checker.py
+        env:
+          SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          PRICE_THRESHOLD_INR: "35000"
+          ADULTS: "1"
